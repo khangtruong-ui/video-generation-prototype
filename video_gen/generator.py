@@ -190,6 +190,7 @@ class LongVideoGenerator:
             # Generate chunk frames
             chunk_frames = self.pipeline.generate_chunk(
                 image=cond_image,
+                prompt=prompt_text,
                 num_frames=self.config.generation.num_frames_per_chunk,
                 fps=target_fps,
                 motion_bucket_id=final_motion,

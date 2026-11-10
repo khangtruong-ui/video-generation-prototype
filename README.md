@@ -74,6 +74,30 @@ flowchart TD
 
 ---
 
+## 🚀 Video Models Landscape on NVIDIA L4 GPU (24GB VRAM)
+
+The repository is architected with a pluggable `BaseVideoPipeline` interface, allowing you to use both established baselines and cutting-edge Diffusion Transformer (DiT) architectures:
+
+| Model | Architecture | Resolution | Native FPS | VRAM (L4 24GB) | Conditioning | Best For |
+|---|---|---|---|---|---|---|
+| **LTX-Video** (`Lightricks/LTX-Video`) | 2B DiT (Diffusion Transformer) | 768×512 / 704×480 | **24–25 fps** | ~8–12 GB (bfloat16) | Text + Image | Fast real-time high-fps motion, rich prompt adherence |
+| **CogVideoX-5B-I2V** (`THUDM/CogVideoX-5b-I2V`) | 5B 3D DiT | 720×480 | 8–16 fps | ~14–18 GB (offload) | Text + Image | Expressive cinematic shots, complex physical interactions |
+| **Wan 2.1** (`Wan-AI/Wan2.1-I2V-14B` & `1.3B`) | 1.3B / 14B DiT | 832×480 / 720p | 16–24 fps | ~10 GB (1.3B) / ~18 GB (14B fp8) | Text + Image | SOTA photorealism and high visual fidelity |
+| **SVD-XT** (`stabilityai/stable-video-diffusion-img2vid-xt`) | Latent U-Net | 1024×576 | 7 fps | ~6–14 GB (float16) | Image + Motion bucket | Rock-solid stability, landscape & camera motion |
+
+To select a pipeline:
+```python
+# SVD-XT
+config = VideoConfig.for_l4_gpu()
+generator = LongVideoGenerator(config=config)
+
+# Or LTX-Video DiT
+from video_gen.pipelines import get_pipeline
+ltx_pipe = get_pipeline("ltx_video")
+```
+
+---
+
 ## ⚡ Quickstart
 
 ### 1. Installation

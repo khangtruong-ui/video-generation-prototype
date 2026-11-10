@@ -5,9 +5,11 @@ from video_gen.config import VideoConfig
 from video_gen.pipelines.base import BaseVideoPipeline
 from video_gen.pipelines.mock_pipeline import MockVideoPipeline
 from video_gen.pipelines.svd_pipeline import SVDPipeline
+from video_gen.pipelines.ltx_pipeline import LTXVideoPipeline
 
 PIPELINE_REGISTRY: Dict[str, Type[BaseVideoPipeline]] = {
     "svd_xt": SVDPipeline,
+    "ltx_video": LTXVideoPipeline,
     "mock": MockVideoPipeline,
 }
 
@@ -24,6 +26,8 @@ def get_pipeline(pipeline_type: str = "svd_xt", config: VideoConfig = None) -> B
     pipeline_cls = PIPELINE_REGISTRY[key]
     if pipeline_cls is SVDPipeline:
         return SVDPipeline(model_id=cfg.generation.model_id, config=cfg)
+    elif pipeline_cls is LTXVideoPipeline:
+        return LTXVideoPipeline(config=cfg)
     elif pipeline_cls is MockVideoPipeline:
         return MockVideoPipeline(name="mock", device=cfg.device.device)
     else:
@@ -33,6 +37,7 @@ def get_pipeline(pipeline_type: str = "svd_xt", config: VideoConfig = None) -> B
 __all__ = [
     "BaseVideoPipeline",
     "SVDPipeline",
+    "LTXVideoPipeline",
     "MockVideoPipeline",
     "PIPELINE_REGISTRY",
     "get_pipeline",
