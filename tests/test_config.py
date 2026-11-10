@@ -8,7 +8,7 @@ from video_gen.config import DeviceConfig, GenerationConfig, VideoConfig
 def test_device_config_defaults():
     cfg = DeviceConfig()
     assert cfg.torch_dtype in ["float16", "float32"]
-    assert cfg.decode_chunk_size == 8
+    assert cfg.decode_chunk_size == 4
     assert cfg.enable_vae_slicing is True
     assert cfg.enable_vae_tiling is True
     assert isinstance(cfg.get_torch_dtype(), torch.dtype)
