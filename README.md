@@ -137,7 +137,40 @@ print(f"Video saved to: {result.video_path}")
 print(f"Duration: {result.duration_seconds}s | Frames: {result.num_frames}")
 ```
 
-### 3. Command Line Interface (CLI)
+### 3. Interactive Colab / Jupyter Display & Download API
+
+The package provides a built-in Colab display API that renders responsive HTML5 video players complete with instant browser download links and Google Colab native `files.download` triggers:
+
+```python
+from video_gen import LongVideoGenerator, VideoConfig, display_video, download_video
+
+# 1. Generate video using L4 GPU preset (default 10s @ 7 fps)
+config = VideoConfig.for_l4_gpu(duration_seconds=10.0, fps=7)
+generator = LongVideoGenerator(config=config)
+result = generator.generate(
+    prompt="Cinematic drone flight across misty mountain peaks at sunset",
+    image="https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1024&q=80",
+)
+
+# 2. Display video with interactive player + "Download Video" button
+display_video(
+    result,
+    width=720,
+    autoplay=True,
+    loop=True,
+    include_download=True,
+    title="🎬 10s Mountain Valley Flyover",
+)
+
+# 3. Or trigger programmatic Colab download to local disk
+download_video(result.video_path)
+```
+
+Interactive demo notebooks are ready to run:
+- [`examples/video_generation_demo.ipynb`](examples/video_generation_demo.ipynb)
+- [`VideoGenerationTest.ipynb`](VideoGenerationTest.ipynb)
+
+### 4. Command Line Interface (CLI)
 
 ```bash
 # Generate 10s video on L4 GPU
@@ -285,13 +318,13 @@ The `video_gen/backends/modal_runner.py` module defines the cloud container imag
 
 ## 🧪 Testing
 
-The repository includes a comprehensive test suite (31 tests covering config, loaders, chaining mathematics, video encoding, pipelines, and FastAPI endpoints):
+The repository includes a comprehensive test suite (42 tests covering config, loaders, chaining mathematics, video encoding, pipelines, Colab display & download utilities, notebook end-to-end execution, and FastAPI endpoints):
 
 ```bash
 pytest -v
 ```
 
-All unit and API tests use the `MockVideoPipeline`, executing the full test suite in **< 2 seconds** on CPU.
+All unit, API, and notebook tests use procedural mock pipelines, executing the full test suite in **~2-3 seconds** on CPU without requiring GPU initialization.
 
 ---
 
@@ -299,9 +332,11 @@ All unit and API tests use the `MockVideoPipeline`, executing the full test suit
 
 ```
 video-generation-prototype/
+├── VideoGenerationTest.ipynb# Colab-ready interactive demo notebook
 ├── video_gen/
 │   ├── config.py           # Typed dataclasses, L4 preset, Mock preset
 │   ├── generator.py        # Master LongVideoGenerator & GenerationResult
+│   ├── colab.py            # Colab/Jupyter HTML5 video player & download API
 │   ├── core/
 │   │   ├── image_loader.py # Multi-source image ingestion (URL, base64, path, default)
 │   │   ├── prompt_loader.py# Script parsing & motion bucket inference
@@ -310,6 +345,7 @@ video-generation-prototype/
 │   ├── pipelines/
 │   │   ├── base.py         # BaseVideoPipeline abstract interface
 │   │   ├── svd_pipeline.py # Stable Video Diffusion XT implementation
+│   │   ├── ltx_pipeline.py # LTX-Video DiT implementation
 │   │   └── mock_pipeline.py# Fast procedural mock pipeline for testing
 │   ├── backends/
 │   │   ├── local_runner.py # Local L4 execution runner
@@ -319,8 +355,15 @@ video-generation-prototype/
 │   │   ├── routes.py       # REST endpoints (/generate, /jobs, /videos)
 │   │   └── schemas.py      # Pydantic request & response models
 │   └── cli.py              # CLI commands (generate, serve, info)
-├── tests/                  # 31 unit & integration tests
-├── examples/               # Sample generation script & storyboard
+├── tests/                  # 42 unit & integration tests
+├── examples/               # Sample scripts, storyboards, and notebooks
+│   ├── video_generation_demo.ipynb
+│   ├── generate_sample.py
+│   ├── generate_santa.py
+│   └── sample_storyboard.txt
+├── scripts/
+│   ├── build_notebook.py   # Notebook compiler
+│   └── sync_to_colab.py    # Colab frontend synchronizer
 ├── pyproject.toml
 ├── setup.py
 ├── requirements.txt

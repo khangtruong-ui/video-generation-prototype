@@ -40,22 +40,26 @@ class GenerationResult:
         target.parent.mkdir(parents=True, exist_ok=True)
         return save_video(self.frames, target, fps=self.fps)
 
-    def display(self, width: int = 640):
-        """Helper to render video in an active Jupyter/Colab notebook."""
-        try:
-            from IPython.display import HTML, display
-            video_b64 = self.video_path.read_bytes()
-            import base64
-            b64_str = base64.b64encode(video_b64).decode("utf-8")
-            html_code = f"""
-            <video width="{width}" controls autoplay loop style="border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-                <source src="data:video/mp4;base64,{b64_str}" type="video/mp4">
-                Your browser does not support HTML5 video.
-            </video>
-            """
-            display(HTML(html_code))
-        except ImportError:
-            logger.warning("IPython not available; cannot display inline video.")
+    def display(
+        self,
+        width: int = 640,
+        height: Optional[int] = None,
+        autoplay: bool = True,
+        loop: bool = True,
+        include_download: bool = True,
+        title: Optional[str] = None,
+    ):
+        """Helper to render video in an active Jupyter/Colab notebook with HTML5 player and download button."""
+        from video_gen.colab import display_video
+        return display_video(
+            self,
+            width=width,
+            height=height,
+            autoplay=autoplay,
+            loop=loop,
+            include_download=include_download,
+            title=title,
+        )
 
 
 class LongVideoGenerator:
