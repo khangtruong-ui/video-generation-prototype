@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 from PIL import Image
+import torch
 
 from video_gen.config import VideoConfig
 from video_gen.core.chaining import (
@@ -87,6 +88,9 @@ class LongVideoGenerator:
         images: Optional[List[ImageInput]] = None,
         duration_seconds: Optional[float] = None,
         fps: Optional[int] = None,
+        target_fps: Optional[int] = None,
+        interpolate_factor: Optional[int] = None,
+        interpolate_method: Optional[str] = None,
         motion_bucket_id: Optional[int] = None,
         num_inference_steps: Optional[int] = None,
         noise_aug_strength: Optional[float] = None,
@@ -102,7 +106,10 @@ class LongVideoGenerator:
             image: Single conditioning image (URL, path, base64, or PIL Image).
             images: Multiple conditioning images for multi-scene storyboard.
             duration_seconds: Desired video length (default: config value, e.g. 10.0s).
-            fps: Desired framerate (default: config value, e.g. 7).
+            fps: Desired chunk generation framerate (default: config value, e.g. 16).
+            target_fps: Desired final output framerate after high-FPS GPU interpolation (e.g. 60).
+            interpolate_factor: Integer frame multiplier (e.g. 2, 4) if not using target_fps.
+            interpolate_method: Interpolation mode ("auto", "raft" for optical flow, "blend" for GPU tensor).
             motion_bucket_id: Motion intensity index (1-255).
             num_inference_steps: Denoising steps per chunk.
             noise_aug_strength: Conditioning noise level (default 0.02).
@@ -124,7 +131,7 @@ class LongVideoGenerator:
 
         # 3. Resolve generation settings
         target_duration = duration_seconds or self.config.generation.duration_seconds
-        target_fps = fps or self.config.generation.fps
+        base_fps = fps or self.config.generation.fps
         steps = num_inference_steps or self.config.generation.num_inference_steps
         noise_aug = noise_aug_strength if noise_aug_strength is not None else self.config.generation.noise_aug_strength
         chosen_seed = seed if seed is not None else self.config.generation.seed
@@ -143,7 +150,7 @@ class LongVideoGenerator:
         # 5. Plan temporal chunks
         plan = calculate_chunks_plan(
             duration_seconds=target_duration,
-            fps=target_fps,
+            fps=base_fps,
             num_frames_per_chunk=self.config.generation.num_frames_per_chunk,
             transition_frames=self.config.generation.transition_frames,
         )
@@ -156,7 +163,7 @@ class LongVideoGenerator:
             "Starting generation: duration=%.1fs, chunks=%d, fps=%d, resolution=%dx%d",
             target_duration,
             num_chunks,
-            target_fps,
+            base_fps,
             resolution[0],
             resolution[1],
         )
@@ -196,7 +203,7 @@ class LongVideoGenerator:
                 image=cond_image,
                 prompt=prompt_text,
                 num_frames=self.config.generation.num_frames_per_chunk,
-                fps=target_fps,
+                fps=base_fps,
                 motion_bucket_id=final_motion,
                 noise_aug_strength=noise_aug,
                 num_inference_steps=steps,
@@ -216,14 +223,51 @@ class LongVideoGenerator:
             overlap_frames=self.config.generation.transition_frames,
         )
 
-        # 8. Optional frame interpolation
-        final_fps = target_fps
-        if self.config.generation.interpolate_factor > 1:
+        # 8. High-FPS frame interpolation
+        eff_target_fps = target_fps if target_fps is not None else self.config.generation.target_fps
+        eff_factor = interpolate_factor if interpolate_factor is not None else self.config.generation.interpolate_factor
+        eff_method = interpolate_method or getattr(self.config.generation, "interpolate_method", "auto")
+        interp_device = "cuda" if torch.cuda.is_available() else self.pipeline.device
+
+        final_fps = base_fps
+        interpolated = False
+
+        if eff_target_fps is not None and eff_target_fps > base_fps:
+            logger.info("Interpolating frames from %d fps to high %d fps using method=%s on %s...", base_fps, eff_target_fps, eff_method, interp_device)
+            if progress_callback:
+                progress_callback({
+                    "chunk_index": num_chunks,
+                    "total_chunks": num_chunks,
+                    "overall_percent": 95.0,
+                    "message": f"Interpolating to {eff_target_fps} FPS using GPU ({eff_method})...",
+                })
             stitched_frames = interpolate_frames(
                 stitched_frames,
-                factor=self.config.generation.interpolate_factor,
+                target_fps=eff_target_fps,
+                source_fps=base_fps,
+                method=eff_method,
+                device=interp_device,
             )
-            final_fps = target_fps * self.config.generation.interpolate_factor
+            final_fps = eff_target_fps
+            interpolated = True
+        elif eff_factor is not None and eff_factor > 1:
+            logger.info("Interpolating frames with factor %dx from %d fps to %d fps on %s...", eff_factor, base_fps, base_fps * eff_factor, interp_device)
+            if progress_callback:
+                progress_callback({
+                    "chunk_index": num_chunks,
+                    "total_chunks": num_chunks,
+                    "overall_percent": 95.0,
+                    "message": f"Interpolating {eff_factor}x factor using GPU ({eff_method})...",
+                })
+            stitched_frames = interpolate_frames(
+                stitched_frames,
+                factor=eff_factor,
+                source_fps=base_fps,
+                method=eff_method,
+                device=interp_device,
+            )
+            final_fps = base_fps * eff_factor
+            interpolated = True
 
         # 9. Save to output MP4
         if output_path is not None:
@@ -253,6 +297,9 @@ class LongVideoGenerator:
             "target_duration_seconds": target_duration,
             "actual_duration_seconds": round(actual_duration, 2),
             "fps": final_fps,
+            "source_fps": base_fps,
+            "interpolated": interpolated,
+            "interpolate_method": eff_method if interpolated else None,
             "num_frames": len(stitched_frames),
             "num_chunks": num_chunks,
             "num_inference_steps": steps,

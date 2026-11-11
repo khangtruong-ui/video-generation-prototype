@@ -30,34 +30,50 @@ class GenerateRequest(BaseModel):
         description="Target duration in seconds (default 10s, supports up to minutes)."
     )
     fps: int = Field(
-        default=7,
+        default=16,
         ge=1,
         le=60,
-        description="Frames per second for generated video."
+        description="Chunk generation frames per second (default 16 for Wan2.1).",
+    )
+    target_fps: Optional[int] = Field(
+        default=60,
+        ge=1,
+        le=240,
+        description="Target high framerate achieved via GPU optical-flow interpolation (e.g. 60 fps).",
+    )
+    interpolate_factor: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=16,
+        description="Frame upsampling multiplier (e.g. 2x, 4x) if target_fps is omitted.",
+    )
+    interpolate_method: Optional[str] = Field(
+        default="auto",
+        description="Interpolation engine: 'auto', 'raft' (deep optical flow), or 'blend' (GPU tensor).",
     )
     motion_bucket_id: Optional[int] = Field(
         default=None,
         ge=1,
         le=255,
-        description="Motion magnitude (1-255). If omitted, automatically inferred from prompt."
+        description="Motion magnitude (1-255). If omitted, automatically inferred from prompt.",
     )
     num_inference_steps: Optional[int] = Field(
         default=None,
         ge=1,
         le=100,
-        description="Denoising steps per chunk (default 25 on L4)."
+        description="Denoising steps per chunk (default 30 for Wan on L4).",
     )
     seed: Optional[int] = Field(
         default=None,
-        description="Random seed for reproducible generation."
+        description="Random seed for reproducible generation.",
     )
     async_mode: bool = Field(
         default=False,
-        description="If True, executes asynchronously in background and returns job ID immediately."
+        description="If True, executes asynchronously in background and returns job ID immediately.",
     )
     pipeline_type: Optional[str] = Field(
         default=None,
-        description="Pipeline engine: 'svd_xt' (default on GPU) or 'mock' (instant testing)."
+        description="Pipeline engine: 'wan' (default Wan2.1 14B on GPU), 'svd_xt', 'ltx_video', or 'mock'.",
     )
 
 

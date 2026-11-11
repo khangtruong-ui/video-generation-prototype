@@ -54,3 +54,26 @@ def test_long_video_generator_multi_image(tmp_path):
 
     assert result.video_path.exists()
     assert len(result.frames) > 0
+
+
+def test_long_video_generator_with_interpolation(tmp_path):
+    # Test end-to-end generation with high-fps interpolation
+    cfg = VideoConfig.for_mock(duration_seconds=2.0, fps=5, width=128, height=72, output_dir=tmp_path)
+    generator = LongVideoGenerator(config=cfg)
+
+    input_img = Image.new("RGB", (128, 72), color=(80, 120, 160))
+    result = generator.generate(
+        prompt="A camera soaring across a vast landscape",
+        image=input_img,
+        duration_seconds=2.0,
+        fps=5,
+        target_fps=20,
+        interpolate_method="blend",
+        output_path=tmp_path / "interpolated_test.mp4",
+    )
+
+    assert result.video_path.exists()
+    assert result.fps == 20
+    assert result.metadata["interpolated"] is True
+    assert result.metadata["fps"] == 20
+

@@ -47,6 +47,24 @@ def test_generate_sync_mock():
     assert len(dl_res.content) > 0
 
 
+def test_generate_sync_with_interpolation():
+    payload = {
+        "prompt": "Sunlight dancing across glistening waves",
+        "duration_seconds": 2.0,
+        "fps": 5,
+        "target_fps": 15,
+        "interpolate_method": "blend",
+        "pipeline_type": "mock",
+        "async_mode": False,
+    }
+    res = client.post("/api/v1/generate", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "completed"
+    assert data["fps"] == 15
+    assert data["metadata"]["interpolated"] is True
+
+
 def test_generate_async_mock():
     payload = {
         "prompt": "Fast drone flight through futuristic skyscraper canyon",

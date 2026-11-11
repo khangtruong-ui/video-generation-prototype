@@ -10,12 +10,12 @@ def build_notebook():
     cells = [
         nbf.v4.new_markdown_cell(
             """# 🎬 Long Video Generation Demo in Google Colab
-### Continuous 10-Second Video Generation with Stable Video Diffusion XT (SVD-XT) & L4 GPU
+### Continuous Long Video Generation with Wan2.1 14B & High-FPS GPU Interpolation (NVIDIA L4 GPU)
 
-This notebook demonstrates how to generate high-fidelity, continuous long videos (default **10.0 seconds** at **7 fps**, scaleable to minutes) using the **`video-generation-prototype`** API:
-1. **Conditioning Ingestion**: Text prompt describing motion + conditioning image from a web URL, local path, or curated landscape.
-2. **Autoregressive Temporal Chaining**: Generates sequential 25-frame chunks with cross-dissolve frame blending to eliminate seam cuts.
-3. **NVIDIA L4 Optimization**: fp16 precision, chunked latent VAE decoding (`decode_chunk_size=4`), VAE slicing and tiling.
+This notebook demonstrates how to generate high-fidelity, continuous long videos (default **10.0 seconds** with **Wan2.1 14B Image-to-Video foundation model**, interpolated to smooth **60 FPS** via deep optical flow) using the **`video-generation-prototype`** API:
+1. **Wan2.1 14B Foundation Model**: Flagship open DiT video foundation model by Alibaba running with bfloat16 and model CPU offload on NVIDIA L4 (24GB VRAM).
+2. **Deep Learning Optical Flow Frame Interpolation**: GPU-accelerated motion-compensated bidirectional warping (RAFT) upscaling native 16 fps to silky smooth 60 fps.
+3. **Autoregressive Temporal Chaining**: Generates sequential 81-frame chunks with cross-dissolve frame blending to eliminate seam cuts.
 4. **Colab Video Display & Download API**: In-notebook HTML5 responsive player with instant direct download and Colab Files API integration.
 """
         ),
@@ -33,7 +33,8 @@ print(f"PyTorch version: {torch.__version__}")
 if torch.cuda.is_available():
     device_name = torch.cuda.get_device_name(0)
     vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-    print(f"🚀 GPU Detected: {device_name} ({vram_gb:.1f} GB VRAM)")
+    bf16 = torch.cuda.is_bf16_supported()
+    print(f"🚀 GPU Detected: {device_name} ({vram_gb:.1f} GB VRAM, BF16={bf16})")
 else:
     print("⚠️ No GPU detected. Running in CPU mode (Mock pipeline will be used).")
 """
@@ -52,6 +53,8 @@ if repo_dir.exists() and str(repo_dir) not in sys.path:
 from video_gen import (
     VideoConfig,
     LongVideoGenerator,
+    GPUFrameInterpolator,
+    interpolate_frames,
     display_video,
     download_video,
     is_colab,
@@ -70,26 +73,26 @@ prompt = "Cinematic aerial camera gliding smoothly over majestic snow-capped mou
 
 # @markdown ### 🖼️ Conditioning Image Source
 # @markdown Provide a web URL, a local path, or leave as default Unsplash landscape URL:
-image_url = "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1024&q=80"  # @param {type:"string"}
+image_url = "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=832&q=80"  # @param {type:"string"}
 
 # @markdown ### ⏱️ Video Duration & Dynamics
-# @markdown Default is 10.0 seconds (3 chained chunks of 25 frames, 71 total frames):
+# @markdown Desired video duration in seconds:
 duration_seconds = 10.0  # @param {type:"number"}
 
-# @markdown Frame rate (fps) - 7 fps is native and low-fps optimal for SVD-XT:
-fps = 7  # @param {type:"integer"}
+# @markdown Native chunk framerate (default 16 for Wan2.1):
+fps = 16  # @param {type:"integer"}
 
-# @markdown Motion bucket ID (lower = subtle motion, higher = vigorous dynamic motion):
-motion_bucket_id = 127  # @param {type:"slider", min:50, max:200, step:1}
+# @markdown Target high FPS via GPU Optical-Flow interpolation (e.g. 60 fps):
+target_fps = 60  # @param {type:"slider", min:16, max:120, step:1}
 
-# @markdown Diffusion denoising inference steps (20-25 recommended for fast generation):
-num_inference_steps = 25  # @param {type:"slider", min:15, max:40, step:5}
+# @markdown Diffusion denoising inference steps:
+num_inference_steps = 30  # @param {type:"slider", min:15, max:50, step:5}
 
 # @markdown ### ⚙️ Execution Pipeline
-# @markdown Choose `svd_xt` (real GPU diffusion) or `mock` (instant test):
-pipeline_type = "svd_xt"  # @param ["svd_xt", "mock"]
+# @markdown Choose `wan` (Wan2.1 14B on GPU), `svd_xt`, `ltx_video`, or `mock` (instant test):
+pipeline_type = "wan"  # @param ["wan", "svd_xt", "ltx_video", "mock"]
 
-print(f"Target Video Plan: {duration_seconds}s @ {fps} fps ({int(duration_seconds * fps)} target frames)")
+print(f"Target Video Plan: {duration_seconds}s @ native {fps} fps -> High-FPS output: {target_fps} fps")
 print(f"Prompt: {prompt}")
 print(f"Image Source: {image_url}")
 """
@@ -107,27 +110,46 @@ display(preview_img)
 """
         ),
         nbf.v4.new_code_cell(
-            """# @title 5. Generate Long Video (Chained Autoregressive Diffusion)
+            """# @title 5. Generate Long Video (Chained Autoregressive Diffusion + GPU Interpolation)
 # Setup configuration based on pipeline selection
-if pipeline_type == "svd_xt" and torch.cuda.is_available():
-    print("🎬 Initializing LongVideoGenerator with SVD-XT pipeline on NVIDIA L4 GPU...")
-    config = VideoConfig.for_l4_gpu(
-        duration_seconds=duration_seconds,
-        fps=fps,
-        num_inference_steps=num_inference_steps,
-        motion_bucket_id=motion_bucket_id,
-        seed=42,
-    )
-else:
+if pipeline_type == "mock" or not torch.cuda.is_available():
     print("⚡ Initializing LongVideoGenerator with fast Mock pipeline...")
     config = VideoConfig.for_mock(
         duration_seconds=duration_seconds,
         fps=fps,
+        target_fps=target_fps,
+    )
+elif pipeline_type == "svd_xt":
+    print("🎬 Initializing SVD-XT pipeline...")
+    config = VideoConfig.for_svd_xt(
+        duration_seconds=duration_seconds,
+        fps=7,
+        target_fps=target_fps,
+        num_inference_steps=num_inference_steps,
+        seed=42,
+    )
+elif pipeline_type == "ltx_video":
+    print("🎬 Initializing LTX-Video DiT pipeline...")
+    config = VideoConfig.for_ltx(
+        duration_seconds=duration_seconds,
+        fps=25,
+        target_fps=target_fps,
+        num_inference_steps=num_inference_steps,
+        seed=42,
+    )
+else:
+    print("🎬 Initializing LongVideoGenerator with Wan2.1 14B Image-to-Video pipeline on NVIDIA L4 GPU...")
+    config = VideoConfig.for_l4_gpu(
+        duration_seconds=duration_seconds,
+        fps=fps,
+        target_fps=target_fps,
+        num_inference_steps=num_inference_steps,
+        seed=42,
     )
 
 generator = LongVideoGenerator(config=config)
 
-# Progress callback to show step-by-step chaining progress
+# Progress callback to show step-by-step chaining and interpolation progress
 def on_progress(p):
     pct = p.get("overall_percent", 0.0)
     chunk = p.get("chunk_index", 0)
@@ -135,21 +157,23 @@ def on_progress(p):
     msg = p.get("message", "")
     print(f"[{pct:5.1f}%] Chunk {chunk}/{total_chunks}: {msg}")
 
-print(f"Starting video generation ({duration_seconds}s at {fps} fps)...")
+print(f"Starting video generation ({duration_seconds}s at {fps} fps -> target {target_fps} fps)...")
 result = generator.generate(
     prompt=prompt,
     image=image_url,
     duration_seconds=duration_seconds,
     fps=fps,
+    target_fps=target_fps,
     progress_callback=on_progress,
 )
 
 print("\\n" + "=" * 50)
 print("🎉 Video Generation Finished!")
 print(f"📁 Video Path: {result.video_path}")
-print(f"⏱️ Duration:   {result.duration_seconds:.2f} seconds ({result.num_frames} frames)")
+print(f"⏱️ Duration:   {result.duration_seconds:.2f} seconds ({result.num_frames} frames @ {result.fps} fps)")
 print(f"🎞️ Resolution: {result.width}×{result.height}")
 print(f"🧩 Chunks:     {result.metadata['num_chunks']}")
+print(f"🚀 Smooth:     {'High-FPS GPU interpolated' if result.metadata.get('interpolated') else 'Native'}")
 print(f"⚡ Time taken: {result.metadata['execution_time_seconds']:.2f}s")
 print("=" * 50)
 """
@@ -163,7 +187,7 @@ display_video(
     autoplay=True,
     loop=True,
     include_download=True,
-    title=f"🎬 10s Generated Video: {prompt[:45]}...",
+    title=f"🎬 {result.fps} FPS Generated Video: {prompt[:45]}...",
 )
 """
         ),

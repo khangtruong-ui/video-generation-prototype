@@ -34,7 +34,7 @@ _GENERATORS: Dict[str, LongVideoGenerator] = {}
 
 def get_generator(pipeline_type: Optional[str] = None) -> LongVideoGenerator:
     """Retrieve or initialize generator instance."""
-    p_type = pipeline_type or ("svd_xt" if torch.cuda.is_available() else "mock")
+    p_type = pipeline_type or ("wan" if torch.cuda.is_available() else "mock")
     if p_type not in _GENERATORS:
         if p_type == "mock":
             cfg = VideoConfig.for_mock()
@@ -57,7 +57,7 @@ def health_check():
         else None
     )
 
-    p_type = "svd_xt" if gpu_available else "mock"
+    p_type = "wan" if gpu_available else "mock"
     gen = _GENERATORS.get(p_type)
     loaded = gen.pipeline.is_loaded() if gen else False
 
@@ -74,10 +74,12 @@ def health_check():
         default_config={
             "duration_seconds": cfg.generation.duration_seconds,
             "fps": cfg.generation.fps,
+            "target_fps": cfg.generation.target_fps,
             "width": cfg.generation.width,
             "height": cfg.generation.height,
             "motion_bucket_id": cfg.generation.motion_bucket_id,
             "num_inference_steps": cfg.generation.num_inference_steps,
+            "model_id": cfg.generation.model_id,
         },
     )
 
@@ -105,6 +107,9 @@ def _run_generation_task(job_id: str, req: GenerateRequest, output_dir: Path):
             images=req.images,
             duration_seconds=req.duration_seconds,
             fps=req.fps,
+            target_fps=req.target_fps,
+            interpolate_factor=req.interpolate_factor,
+            interpolate_method=req.interpolate_method,
             motion_bucket_id=req.motion_bucket_id,
             num_inference_steps=req.num_inference_steps,
             seed=req.seed,
@@ -169,6 +174,9 @@ def generate_video(req: GenerateRequest, background_tasks: BackgroundTasks):
             images=req.images,
             duration_seconds=req.duration_seconds,
             fps=req.fps,
+            target_fps=req.target_fps,
+            interpolate_factor=req.interpolate_factor,
+            interpolate_method=req.interpolate_method,
             motion_bucket_id=req.motion_bucket_id,
             num_inference_steps=req.num_inference_steps,
             seed=req.seed,
@@ -209,7 +217,10 @@ async def generate_video_upload(
     prompt_file: Optional[UploadFile] = File(None),
     image: Optional[UploadFile] = File(None),
     duration_seconds: float = Form(10.0),
-    fps: int = Form(7),
+    fps: int = Form(16),
+    target_fps: Optional[int] = Form(60),
+    interpolate_factor: Optional[int] = Form(None),
+    interpolate_method: Optional[str] = Form("auto"),
     motion_bucket_id: Optional[int] = Form(None),
     num_inference_steps: Optional[int] = Form(None),
     seed: Optional[int] = Form(None),
@@ -235,6 +246,9 @@ async def generate_video_upload(
         image=image_bytes if image_bytes else None,
         duration_seconds=duration_seconds,
         fps=fps,
+        target_fps=target_fps,
+        interpolate_factor=interpolate_factor,
+        interpolate_method=interpolate_method,
         motion_bucket_id=motion_bucket_id,
         num_inference_steps=num_inference_steps,
         seed=seed,

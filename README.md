@@ -1,29 +1,36 @@
 # 🎬 Long Video Generation Prototype
 
-An extensible, production-ready prototype for generating continuous long videos (default **10 seconds**, scaleable to **minutes**) from text prompts and conditioning images. Powered by **Stable Video Diffusion XT (SVD-XT)**, autoregressive chunk chaining with seamless cross-dissolve transitions, **FastAPI REST API**, and optimized specifically for the **NVIDIA L4 GPU (24GB VRAM)**.
+An extensible, production-ready framework for generating continuous long videos (default **10 seconds**, scaleable to **minutes**) from text prompts and conditioning images. Powered by **Wan2.1 14B Diffusion Transformer (DiT)** foundation model, **Deep Learning Optical Flow GPU Frame Interpolation (16 fps → 60 fps)**, autoregressive chunk chaining with seamless cross-dissolve transitions, **FastAPI REST API**, and optimized specifically to maximize the **NVIDIA L4 GPU (24GB VRAM)**.
 
 ---
 
 ## 🌟 Key Features
 
-- **Long Video Generation**: Generates 10-second videos by default (and extends seamlessly to 30s, 60s, or minutes) using autoregressive temporal chunk chaining and cross-dissolve frame blending.
+- **Default Flagship Model: Wan2.1 14B Image-to-Video**:
+  - Utilizes Alibaba's cutting-edge **Wan2.1-I2V-14B-480P** Diffusion Transformer foundation model.
+  - Native 16 fps generation at 832×480 resolution (16:9 widescreen).
+  - 81 frames per chunk (~5.06s) chained autoregressively for continuous, artifact-free long-duration videos.
+- **High-FPS GPU Frame Interpolation (16 fps → 60+ fps)**:
+  - **Deep Optical Flow (RAFT)**: Recurrent All-Pairs Field Transforms computing bidirectional flow fields on GPU for motion-compensated warping. Eliminates ghosting and motion blur.
+  - **Batched GPU Tensor Blending**: Parallel CUDA tensor arithmetic for ultrafast frame rate doubling/quadrupling.
+  - Arbitrary target framerate support (e.g. 30 fps, 60 fps, 120 fps) or integer multipliers (2x, 4x, 8x).
+- **Engineered to Maximize NVIDIA L4 GPU (24GB VRAM)**:
+  - **Precision**: `bfloat16` native to Ada Lovelace (compute capability 8.9) tensor cores.
+  - **Sequential Model CPU Offloading**: Allows the full 14B parameter model and activations to fit and run at high throughput within 24GB VRAM.
+  - **3D VAE Slicing & Tiling**: Chunked spatial/temporal latent decoding prevents VRAM spikes during 81-frame decoding passes.
+- **Multi-Pipeline Architecture**:
+  - `WanVideoPipeline` (**Default**): Alibaba Wan2.1 14B Image-to-Video foundation model.
+  - `SVDPipeline`: Stable Video Diffusion XT (`stabilityai/stable-video-diffusion-img2vid-xt`).
+  - `LTXVideoPipeline`: Lightricks LTX-Video DiT (`Lightricks/LTX-Video`).
+  - `MockVideoPipeline`: High-speed procedural mock pipeline (<0.1s/chunk) for CI/CD, testing, and offline execution without GPU.
 - **Dual Conditioning (Prompt + Image)**:
-  - **Prompt**: Direct string or loaded from a `.txt` file script with automatic motion dynamics analysis (adjusts `motion_bucket_id` based on prompt cues).
-  - **Image**: Web URL (auto-downloaded), local file path, base64 data URI, or multiple images for multi-scene storyboarding. Defaults to a curated high-resolution internet landscape if omitted.
-- **NVIDIA L4 GPU Optimized**:
-  - Precision: `float16`
-  - VRAM Footprint: ~6–14GB (well within the 24GB L4 limit)
-  - Memory Optimizations: VAE chunked latent decoding (`decode_chunk_size=8`), attention slicing, and memory cache management.
-- **Dual Pipeline Architecture**:
-  - `SVDPipeline`: High-fidelity image-to-video generation using `stabilityai/stable-video-diffusion-img2vid-xt`.
-  - `MockVideoPipeline`: Ultra-fast procedural mock pipeline (<0.1s/chunk) for CI/CD, unit testing, and instant local debugging without GPU.
+  - **Prompt**: Direct string or loaded from `.txt` script with dynamic motion analysis.
+  - **Image**: Web URL (auto-downloaded), local path, base64 data URI, or multiple images for multi-scene storyboarding.
 - **Full-Featured API**:
   - FastAPI server with `/api/v1/generate`, `/api/v1/generate/upload` (multipart), `/api/v1/jobs/{job_id}` (async progress polling), and `/api/v1/videos/{video_id}` (streaming & download).
   - OpenAPI / Swagger UI at `/docs`.
-- **Modular & Extensible**:
-  - Abstract `BaseVideoPipeline` interface allows easily plugging in future models (e.g., CogVideoX, Wan, LTX, I2VGen-XL).
-  - Pluggable backends: `LocalRunner` for the current L4 GPU, plus a turnkey `modal_runner.py` scaffold for future Modal cloud scaling.
-- **Interactive Colab Notebook**: In-browser video player, progress tracking, and one-click download.
+- **Interactive Colab & Jupyter Integration**:
+  - Responsive in-notebook HTML5 player with interactive controls and instant download button.
 
 ---
 
@@ -32,29 +39,35 @@ An extensible, production-ready prototype for generating continuous long videos 
 ```mermaid
 flowchart TD
     subgraph Inputs["1. Ingestion"]
-        A1["Prompt (Direct Text or .txt File)"]
-        A2["Conditioning Image (URL / Local / Base64 / Default)"]
-        A3["Multi-Image Storyboard (Optional)"]
+        A1["Prompt (Direct Text or .txt Script)"]
+        A2["Conditioning Image (URL / Local Path / Base64)"]
+        A3["Multi-Image Storyboard Keyframes (Optional)"]
     end
 
-    subgraph Core["2. Core Engine"]
+    subgraph Core["2. Core Conditioning & Chaining Engine"]
         B1["PromptLoader: Semantic & Motion Analysis"]
-        B2["ImageLoader: Download, Preprocessing & Smart Crop"]
-        B3["Chaining Engine: Temporal Chunk Calculator"]
+        B2["ImageLoader: Preprocessing & Aspect Ratio Resizing"]
+        B3["Temporal Planner: Autoregressive Chunk Breakdown"]
     end
 
-    subgraph Generation["3. Autoregressive Video Generation"]
-        C1["Chunk 0: Conditioned on Image 0"]
-        C2["Chunk 1: Conditioned on Last Frame of Chunk 0"]
-        C3["Chunk K: Autoregressive Extension (up to N min)"]
-        C4["Seamless Stitching: Linear Cross-Dissolve Overlap"]
+    subgraph Diffusion["3. Wan2.1 14B Foundation DiT Pipeline"]
+        C1["Chunk 0: Conditioned on Anchor Image (81 frames)"]
+        C2["Chunk 1: Autoregressively Conditioned on Last Frame of Chunk 0"]
+        C3["Chunk K: Arbitrary Long Video Extension (up to N min)"]
+        C4["Cross-Dissolve Blend: Overlap Transition Smoothing"]
     end
 
-    subgraph Output["4. Delivery & Interfaces"]
-        D1["FastAPI REST Server (/api/v1/generate)"]
-        D2["Python SDK (LongVideoGenerator)"]
-        D3["CLI (video-gen generate)"]
-        D4["Colab HTML5 Video Player & Download"]
+    subgraph Interpolator["4. GPU Frame Interpolator (High-FPS)"]
+        D1["RAFT Optical Flow: Bidirectional Flow Estimation on CUDA"]
+        D2["Motion-Compensated Warping (torch.nn.functional.grid_sample)"]
+        D3["Output Upscaled to 60 FPS (Silky Smooth Motion)"]
+    end
+
+    subgraph Output["5. Delivery & Interfaces"]
+        E1["FastAPI REST Server (/api/v1/generate)"]
+        E2["Python SDK (LongVideoGenerator)"]
+        E3["CLI (video-gen generate)"]
+        E4["Interactive Colab Video Player & Download"]
     end
 
     A1 --> B1
@@ -67,34 +80,24 @@ flowchart TD
     C2 --> C3
     C3 --> C4
     C4 --> D1
-    C4 --> D2
-    C4 --> D3
-    C4 --> D4
+    D1 --> D2
+    D2 --> D3
+    D3 --> E1
+    D3 --> E2
+    D3 --> E3
+    D3 --> E4
 ```
 
 ---
 
-## 🚀 Video Models Landscape on NVIDIA L4 GPU (24GB VRAM)
+## 🚀 Video Models on NVIDIA L4 GPU (24GB VRAM)
 
-The repository is architected with a pluggable `BaseVideoPipeline` interface, allowing you to use both established baselines and cutting-edge Diffusion Transformer (DiT) architectures:
-
-| Model | Architecture | Resolution | Native FPS | VRAM (L4 24GB) | Conditioning | Best For |
-|---|---|---|---|---|---|---|
-| **LTX-Video** (`Lightricks/LTX-Video`) | 2B DiT (Diffusion Transformer) | 768×512 / 704×480 | **24–25 fps** | ~8–12 GB (bfloat16) | Text + Image | Fast real-time high-fps motion, rich prompt adherence |
-| **CogVideoX-5B-I2V** (`THUDM/CogVideoX-5b-I2V`) | 5B 3D DiT | 720×480 | 8–16 fps | ~14–18 GB (offload) | Text + Image | Expressive cinematic shots, complex physical interactions |
-| **Wan 2.1** (`Wan-AI/Wan2.1-I2V-14B` & `1.3B`) | 1.3B / 14B DiT | 832×480 / 720p | 16–24 fps | ~10 GB (1.3B) / ~18 GB (14B fp8) | Text + Image | SOTA photorealism and high visual fidelity |
-| **SVD-XT** (`stabilityai/stable-video-diffusion-img2vid-xt`) | Latent U-Net | 1024×576 | 7 fps | ~6–14 GB (float16) | Image + Motion bucket | Rock-solid stability, landscape & camera motion |
-
-To select a pipeline:
-```python
-# SVD-XT
-config = VideoConfig.for_l4_gpu()
-generator = LongVideoGenerator(config=config)
-
-# Or LTX-Video DiT
-from video_gen.pipelines import get_pipeline
-ltx_pipe = get_pipeline("ltx_video")
-```
+| Model | Pipeline Key | Architecture | Resolution | Native FPS | Interpolated FPS | VRAM Footprint | Best For |
+|---|---|---|---|---|---|---|---|
+| **Wan 2.1 14B** (**Default**) | `wan` | 14B DiT (Diffusion Transformer) | 832×480 / 720p | 16 fps | **60 fps** | ~18–22 GB (bfloat16 + offload) | SOTA photorealism, complex motion, visual fidelity |
+| **LTX-Video** | `ltx_video` | 2B DiT | 704×480 / 768×512 | 24–25 fps | **60 fps** | ~8–12 GB (bfloat16) | Fast generation, high native framerate |
+| **SVD-XT** | `svd_xt` | Latent U-Net | 1024×576 | 7 fps | **30–60 fps** | ~6–14 GB (float16) | Camera motion, steady landscapes |
+| **Procedural Mock** | `mock` | CPU Synthetic Waveform | Configurable | Any | Any | < 100 MB | Instant CI testing, local CPU validation |
 
 ---
 
@@ -103,7 +106,7 @@ ltx_pipe = get_pipeline("ltx_video")
 ### 1. Installation
 
 ```bash
-# Clone and enter repo
+# Clone repository
 git clone https://github.com/khangtruong-ui/video-generation-prototype.git
 cd video-generation-prototype
 
@@ -111,58 +114,83 @@ cd video-generation-prototype
 pip install -e .
 ```
 
-### 2. Python API
+### 2. Python SDK
 
 ```python
 from video_gen import LongVideoGenerator, VideoConfig
 
-# 1. Initialize generator with L4 GPU preset
+# 1. Initialize generator with L4 GPU preset (Wan2.1 14B + 60 FPS interpolation)
 config = VideoConfig.for_l4_gpu(
     duration_seconds=10.0,
-    fps=7,
-    num_inference_steps=25,
+    fps=16,
+    target_fps=60,  # GPU optical-flow interpolation to 60 FPS
+    num_inference_steps=30,
 )
 generator = LongVideoGenerator(config=config)
 
-# 2. Generate long video (10s = 71 frames across 3 chained chunks)
+# 2. Generate long video (10s continuous video at 60 FPS)
 result = generator.generate(
-    prompt="Cinematic drone flight across misty mountain peaks at sunset, 8k photorealistic",
-    image="https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1024&q=80",
+    prompt="Cinematic drone flight across misty mountain peaks at golden hour sunset, 8k photorealistic",
+    image="https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=832&q=80",
     duration_seconds=10.0,
-    fps=7,
-    output_path="outputs/my_video.mp4",
+    target_fps=60,
+    output_path="outputs/wan_mountain_60fps.mp4",
 )
 
 print(f"Video saved to: {result.video_path}")
-print(f"Duration: {result.duration_seconds}s | Frames: {result.num_frames}")
+print(f"Duration: {result.duration_seconds}s | Frames: {result.num_frames} @ {result.fps} fps")
 ```
 
-### 3. Interactive Colab / Jupyter Display & Download API
+### 3. GPU Frame Interpolation Standalone API
 
-The package provides a built-in Colab display API that renders responsive HTML5 video players complete with instant browser download links and Google Colab native `files.download` triggers:
+You can also use the high-performance GPU Frame Interpolator directly on any frame sequence:
+
+```python
+from PIL import Image
+from video_gen import GPUFrameInterpolator, interpolate_frames
+
+# Method 1: Functional helper
+interpolated_frames = interpolate_frames(
+    frames=my_frames,
+    target_fps=60,
+    source_fps=16,
+    method="raft",  # Deep learning optical flow on CUDA
+)
+
+# Method 2: Object-oriented interpolator class
+interpolator = GPUFrameInterpolator(device="cuda", model_name="raft_small")
+smooth_frames, final_fps = interpolator.interpolate_sequence(
+    frames=my_frames,
+    target_fps=60,
+    source_fps=16,
+    method="raft",
+)
+```
+
+### 4. Interactive Colab / Jupyter Display & Download API
 
 ```python
 from video_gen import LongVideoGenerator, VideoConfig, display_video, download_video
 
-# 1. Generate video using L4 GPU preset (default 10s @ 7 fps)
-config = VideoConfig.for_l4_gpu(duration_seconds=10.0, fps=7)
+# Generate video
+config = VideoConfig.for_l4_gpu(duration_seconds=10.0, target_fps=60)
 generator = LongVideoGenerator(config=config)
 result = generator.generate(
-    prompt="Cinematic drone flight across misty mountain peaks at sunset",
-    image="https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1024&q=80",
+    prompt="Majestic waterfall cascading through lush rainforest canopy",
+    image="https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=832&q=80",
 )
 
-# 2. Display video with interactive player + "Download Video" button
+# Display interactive HTML5 player with download button
 display_video(
     result,
     width=720,
     autoplay=True,
     loop=True,
     include_download=True,
-    title="🎬 10s Mountain Valley Flyover",
+    title="🎬 60 FPS Rainforest Waterfall",
 )
 
-# 3. Or trigger programmatic Colab download to local disk
+# Or trigger native Colab file download:
 download_video(result.video_path)
 ```
 
@@ -170,25 +198,30 @@ Interactive demo notebooks are ready to run:
 - [`examples/video_generation_demo.ipynb`](examples/video_generation_demo.ipynb)
 - [`VideoGenerationTest.ipynb`](VideoGenerationTest.ipynb)
 
-### 4. Command Line Interface (CLI)
+### 5. Command Line Interface (CLI)
 
 ```bash
-# Generate 10s video on L4 GPU
+# Generate 10s video on L4 GPU using default Wan2.1 14B + 60 FPS interpolation
 video-gen generate \
-  --prompt "Cinematic flythrough over a sunlit autumn forest" \
-  --image "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1024&q=80" \
+  --prompt "Cinematic flythrough over a sunlit autumn forest, 8k" \
+  --image "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=832&q=80" \
   --duration 10.0 \
-  --fps 7 \
-  --output outputs/cli_video.mp4
+  --fps 16 \
+  --target-fps 60 \
+  --output outputs/wan_forest_60fps.mp4
 
-# Generate using prompt file (.txt)
+# Generate using prompt script (.txt)
 video-gen generate \
   --prompt-file examples/sample_storyboard.txt \
   --duration 10.0 \
-  --output outputs/storyboard.mp4
+  --target-fps 60 \
+  --output outputs/storyboard_60fps.mp4
 
-# Run with mock pipeline (instant testing without GPU)
-video-gen generate --mock --duration 5.0 --output outputs/mock.mp4
+# Run with fast procedural mock pipeline for instant local test (no GPU required)
+video-gen generate --mock --duration 4.0 --target-fps 30 --output outputs/mock.mp4
+
+# Check GPU memory diagnostics and RAFT optical flow support
+video-gen info
 
 # Start FastAPI server
 video-gen serve --host 0.0.0.0 --port 8000
@@ -198,7 +231,7 @@ video-gen serve --host 0.0.0.0 --port 8000
 
 ## 🌐 REST API Reference
 
-Launch the server with `video-gen serve --port 8000`. The interactive Swagger UI is available at `http://localhost:8000/docs`.
+Launch the server with `video-gen serve --port 8000`. Interactive Swagger UI is available at `http://localhost:8000/docs`.
 
 ### 1. Generate Video (Synchronous)
 
@@ -207,9 +240,11 @@ curl -X POST "http://localhost:8000/api/v1/generate" \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "Cinematic aerial camera gliding smoothly over majestic natural scenery, sunset lighting",
-    "image": "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1024&q=80",
+    "image": "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=832&q=80",
     "duration_seconds": 10.0,
-    "fps": 7,
+    "fps": 16,
+    "target_fps": 60,
+    "pipeline_type": "wan",
     "async_mode": false
   }'
 ```
@@ -221,14 +256,18 @@ curl -X POST "http://localhost:8000/api/v1/generate" \
   "status": "completed",
   "download_url": "/api/v1/videos/gen_8e19ad04ef51",
   "stream_url": "/api/v1/videos/gen_8e19ad04ef51/stream",
-  "duration_seconds": 10.14,
-  "fps": 7,
-  "num_frames": 71,
-  "num_chunks": 3,
+  "duration_seconds": 10.12,
+  "fps": 60,
+  "num_frames": 608,
+  "num_chunks": 2,
   "metadata": {
-    "pipeline": "svd_xt",
+    "pipeline": "wan",
+    "source_fps": 16,
+    "fps": 60,
+    "interpolated": true,
+    "interpolate_method": "auto",
     "device": "cuda",
-    "execution_time_seconds": 45.2
+    "execution_time_seconds": 65.4
   }
 }
 ```
@@ -241,131 +280,50 @@ curl -X POST "http://localhost:8000/api/v1/generate" \
   -d '{
     "prompt": "A continuous 30-second camera flyover across mountain ranges",
     "duration_seconds": 30.0,
+    "target_fps": 60,
     "async_mode": true
   }'
 ```
 
-**Check Job Progress:**
+**Query Progress:**
 ```bash
 curl "http://localhost:8000/api/v1/jobs/gen_8e19ad04ef51"
 ```
 
-**Response:**
-```json
-{
-  "job_id": "gen_8e19ad04ef51",
-  "status": "processing",
-  "progress_percent": 66.7,
-  "message": "Chunk 2/9: Denoising step 18/25"
-}
-```
-
-### 3. File Upload Endpoint (`multipart/form-data`)
+### 3. Stream & Download Video
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/generate/upload" \
-  -F "prompt_file=@examples/sample_storyboard.txt" \
-  -F "image=@my_photo.jpg" \
-  -F "duration_seconds=10.0"
+# Inline browser streaming
+GET /api/v1/videos/{video_id}/stream
+
+# Direct file download
+GET /api/v1/videos/{video_id}
 ```
 
-### 4. Health & GPU Diagnostics
+### 4. System Health & Hardware Diagnostics
 
 ```bash
-curl "http://localhost:8000/api/v1/health"
+GET /api/v1/health
 ```
-
----
-
-## 🎮 How Long Video Chaining Works
-
-Standard Image-to-Video diffusion models generate short isolated clips (typically 14 or 25 frames, $\approx 3.5$ seconds at 7 fps). To generate coherent videos of **10 seconds up to minutes**:
-
-1. **Chunk Calculation**:
-   - At 7 fps, a 10s video requires $\approx 70$ frames.
-   - Using 25 frames per chunk with 2 overlapping transition frames ($M=2$), each subsequent chunk adds $25 - 2 = 23$ unique frames.
-   - Chunks needed: $1 + \lceil (70 - 25) / 23 \rceil = 3$ chunks (71 total stitched frames = $10.14$ seconds).
-2. **Autoregressive Conditioning**:
-   - Chunk 0 is conditioned on the input image.
-   - Chunk 1 is conditioned on the **last frame of Chunk 0** with low noise augmentation (`noise_aug_strength=0.02`), preserving visual consistency.
-   - Chunk $k$ is conditioned on the last frame of Chunk $k-1$.
-3. **Cross-Dissolve Smoothing**:
-   - Adjacent chunks overlap by $M$ frames and are blended using linear alpha cross-dissolve:
-     $$F_{\text{blend}}[i] = (1 - \alpha) \cdot A[K - M + i] + \alpha \cdot B[i]$$
-   - This eliminates sudden seam cuts between chunks.
-4. **Multi-Image Mode**:
-   - When multiple images are provided (e.g. 3 images), the planner assigns each image as a keyframe anchor across the chunks, allowing multi-scene cinematic narratives.
-
----
-
-## 🚀 Scaling to Modal (Future GPU Runner)
-
-When scaling to cloud GPUs on [Modal](https://modal.com/):
-
-```bash
-# 1. Install modal and authenticate
-pip install modal
-modal setup
-
-# 2. Deploy or run on Modal L4 / A100 GPU
-modal run video_gen/backends/modal_runner.py --prompt "cinematic flyover" --duration 10
-modal deploy video_gen/backends/modal_runner.py
-```
-
-The `video_gen/backends/modal_runner.py` module defines the cloud container image, persistent volume model caching, and `@app.cls(gpu="L4")` execution.
 
 ---
 
 ## 🧪 Testing
 
-The repository includes a comprehensive test suite (42 tests covering config, loaders, chaining mathematics, video encoding, pipelines, Colab display & download utilities, notebook end-to-end execution, and FastAPI endpoints):
+The repository maintains an extensive test suite verifying configuration presets, pipelines, API routes, Colab helpers, and GPU frame interpolation:
 
 ```bash
-pytest -v
-```
+# Run full test suite
+PYTHONPATH=. pytest
 
-All unit, API, and notebook tests use procedural mock pipelines, executing the full test suite in **~2-3 seconds** on CPU without requiring GPU initialization.
+# Run specific test modules
+PYTHONPATH=. pytest tests/test_wan_pipeline.py
+PYTHONPATH=. pytest tests/test_interpolator.py
+PYTHONPATH=. pytest tests/test_generator.py
+```
 
 ---
 
-## 📁 Repository Structure
+## 📄 License
 
-```
-video-generation-prototype/
-├── VideoGenerationTest.ipynb# Colab-ready interactive demo notebook
-├── video_gen/
-│   ├── config.py           # Typed dataclasses, L4 preset, Mock preset
-│   ├── generator.py        # Master LongVideoGenerator & GenerationResult
-│   ├── colab.py            # Colab/Jupyter HTML5 video player & download API
-│   ├── core/
-│   │   ├── image_loader.py # Multi-source image ingestion (URL, base64, path, default)
-│   │   ├── prompt_loader.py# Script parsing & motion bucket inference
-│   │   ├── chaining.py     # Autoregressive chunk planner & cross-dissolve blending
-│   │   └── video_utils.py  # H.264 MP4 encoding & metadata extraction
-│   ├── pipelines/
-│   │   ├── base.py         # BaseVideoPipeline abstract interface
-│   │   ├── svd_pipeline.py # Stable Video Diffusion XT implementation
-│   │   ├── ltx_pipeline.py # LTX-Video DiT implementation
-│   │   └── mock_pipeline.py# Fast procedural mock pipeline for testing
-│   ├── backends/
-│   │   ├── local_runner.py # Local L4 execution runner
-│   │   └── modal_runner.py # Modal cloud GPU deployment definition
-│   ├── api/
-│   │   ├── app.py          # FastAPI application factory & CORS
-│   │   ├── routes.py       # REST endpoints (/generate, /jobs, /videos)
-│   │   └── schemas.py      # Pydantic request & response models
-│   └── cli.py              # CLI commands (generate, serve, info)
-├── tests/                  # 42 unit & integration tests
-├── examples/               # Sample scripts, storyboards, and notebooks
-│   ├── video_generation_demo.ipynb
-│   ├── generate_sample.py
-│   ├── generate_santa.py
-│   └── sample_storyboard.txt
-├── scripts/
-│   ├── build_notebook.py   # Notebook compiler
-│   └── sync_to_colab.py    # Colab frontend synchronizer
-├── pyproject.toml
-├── setup.py
-├── requirements.txt
-└── README.md
-```
+MIT License. See [LICENSE](LICENSE) for details.

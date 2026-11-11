@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 import cv2
 import imageio
 import numpy as np
@@ -76,28 +76,46 @@ def save_video(
 
 def interpolate_frames(
     frames: List[Image.Image],
-    factor: int = 2,
+    factor: Optional[int] = None,
+    target_fps: Optional[int] = None,
+    source_fps: int = 16,
+    method: str = "auto",
+    device: Optional[str] = None,
 ) -> List[Image.Image]:
-    """Upsample framerate by interpolating intermediate frames via linear frame blending.
+    """Upsample framerate by interpolating intermediate frames.
 
-    For factor=2: duplicates frame count and doubles smoothness (e.g. 7 fps -> 14 fps).
+    Uses deep learning optical flow (RAFT) or GPU tensor blending to achieve high-FPS video.
+
+    Args:
+        frames: Sequence of PIL images.
+        factor: Integer upsampling factor (e.g. 2 for 2x fps).
+        target_fps: Target high framerate (e.g. 30, 60 fps).
+        source_fps: Input native playback framerate (default 16).
+        method: "auto", "raft" (deep optical flow), or "blend" (GPU tensor blend).
+        device: "cuda" or "cpu" (defaults to CUDA if available).
+
+    Returns:
+        List of interpolated PIL images.
     """
-    if factor <= 1 or len(frames) < 2:
+    if len(frames) < 2:
         return list(frames)
 
-    interpolated: List[Image.Image] = []
-    for i in range(len(frames) - 1):
-        f0 = np.array(frames[i], dtype=np.float32)
-        f1 = np.array(frames[i + 1], dtype=np.float32)
+    # Backward compatible default
+    effective_factor = factor
+    if effective_factor is None and target_fps is None:
+        effective_factor = 2
 
-        for step in range(factor):
-            weight = step / factor
-            blended = (1.0 - weight) * f0 + weight * f1
-            interpolated.append(Image.fromarray(np.clip(blended, 0, 255).astype(np.uint8)))
+    from video_gen.core.interpolator import GPUFrameInterpolator
 
-    # Append the last frame
-    interpolated.append(frames[-1])
-    return interpolated
+    interpolator = GPUFrameInterpolator(device=device)
+    result_frames, _ = interpolator.interpolate_sequence(
+        frames=frames,
+        factor=effective_factor,
+        target_fps=target_fps,
+        source_fps=source_fps,
+        method=method,
+    )
+    return result_frames
 
 
 def read_video_metadata(video_path: Union[str, Path]) -> Dict[str, Any]:
