@@ -16,6 +16,7 @@ dependencies = [
     "torch>=2.0.0",
     "torchvision>=0.15.0",
     "diffusers>=0.28.0",
+    "ftfy>=6.0.0",
     "transformers>=4.38.0",
     "accelerate>=0.28.0",
     "fastapi>=0.100.0",

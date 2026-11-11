@@ -12,6 +12,28 @@ from video_gen.pipelines.base import BaseVideoPipeline, ProgressCallback
 
 logger = logging.getLogger(__name__)
 
+# Ensure ftfy compatibility for diffusers Wan pipeline
+try:
+    import ftfy
+except ImportError:
+    import types
+    ftfy = types.ModuleType("ftfy")
+    ftfy.fix_text = lambda text: text
+
+try:
+    import diffusers.pipelines.wan.pipeline_wan_i2v as wan_i2v_mod
+    if not hasattr(wan_i2v_mod, "ftfy"):
+        wan_i2v_mod.ftfy = ftfy
+except Exception:
+    pass
+
+try:
+    import diffusers.pipelines.wan.pipeline_wan as wan_t2v_mod
+    if not hasattr(wan_t2v_mod, "ftfy"):
+        wan_t2v_mod.ftfy = ftfy
+except Exception:
+    pass
+
 DEFAULT_WAN_NEGATIVE_PROMPT = (
     "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, "
     "images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, "

@@ -64,3 +64,10 @@ def test_wan_pipeline_mocked_generate_chunk():
     # Test unload
     pipeline.unload()
     assert pipeline.is_loaded() is False
+
+
+def test_diffusers_wan_prompt_clean_no_name_error():
+    import diffusers.pipelines.wan.pipeline_wan_i2v as wan_mod
+    # Verify that basic_clean and prompt_clean do not raise NameError: name 'ftfy' is not defined
+    cleaned = wan_mod.prompt_clean("A magical sunset with &amp; special characters")
+    assert "sunset" in cleaned
