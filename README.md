@@ -15,7 +15,8 @@ An extensible, production-ready framework for generating continuous long videos 
   - **Batched GPU Tensor Blending**: Parallel CUDA tensor arithmetic for ultrafast frame rate doubling/quadrupling.
   - Arbitrary target framerate support (e.g. 30 fps, 60 fps, 120 fps) or integer multipliers (2x, 4x, 8x).
 - **Engineered to Maximize NVIDIA L4 GPU (24GB VRAM)**:
-  - **Precision**: `bfloat16` native to Ada Lovelace (compute capability 8.9) tensor cores.
+  - **Default Float 8-bit Precision (`float8_e4m3fn`)**: Utilizes NVIDIA Ada Lovelace (sm_89) native FP8 Tensor Cores via `torchao` weight quantization. Cuts 14B parameter transformer memory footprint from ~28 GB to ~14 GB, leaving over 10 GB VRAM headroom for optical flow interpolation and activation caches.
+  - **Automatic 16-bit Hardware Fallback**: Gracefully falls back to `bfloat16` (on modern GPUs like A100/H100) or `float16` (on T4/V100) or `float32` (on CPU) when FP8 is not supported.
   - **Sequential Model CPU Offloading**: Allows the full 14B parameter model and activations to fit and run at high throughput within 24GB VRAM.
   - **3D VAE Slicing & Tiling**: Chunked spatial/temporal latent decoding prevents VRAM spikes during 81-frame decoding passes.
 - **Multi-Pipeline Architecture**:
@@ -94,7 +95,7 @@ flowchart TD
 
 | Model | Pipeline Key | Architecture | Resolution | Native FPS | Interpolated FPS | VRAM Footprint | Best For |
 |---|---|---|---|---|---|---|---|
-| **Wan 2.1 14B** (**Default**) | `wan` | 14B DiT (Diffusion Transformer) | 832×480 / 720p | 16 fps | **60 fps** | ~18–22 GB (bfloat16 + offload) | SOTA photorealism, complex motion, visual fidelity |
+| **Wan 2.1 14B** (**Default**) | `wan` | 14B DiT (Diffusion Transformer) | 832×480 / 720p | 16 fps | **60 fps** | ~12–14 GB (Float 8-bit default) / ~18–22 GB (16-bit) | SOTA photorealism, complex motion, visual fidelity |
 | **LTX-Video** | `ltx_video` | 2B DiT | 704×480 / 768×512 | 24–25 fps | **60 fps** | ~8–12 GB (bfloat16) | Fast generation, high native framerate |
 | **SVD-XT** | `svd_xt` | Latent U-Net | 1024×576 | 7 fps | **30–60 fps** | ~6–14 GB (float16) | Camera motion, steady landscapes |
 | **Procedural Mock** | `mock` | CPU Synthetic Waveform | Configurable | Any | Any | < 100 MB | Instant CI testing, local CPU validation |
@@ -201,13 +202,14 @@ Interactive demo notebooks are ready to run:
 ### 5. Command Line Interface (CLI)
 
 ```bash
-# Generate 10s video on L4 GPU using default Wan2.1 14B + 60 FPS interpolation
+# Generate 10s video on L4 GPU using default Wan2.1 14B + Float 8-bit precision + 60 FPS interpolation
 video-gen generate \
   --prompt "Cinematic flythrough over a sunlit autumn forest, 8k" \
   --image "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=832&q=80" \
   --duration 10.0 \
   --fps 16 \
   --target-fps 60 \
+  --precision auto \
   --output outputs/wan_forest_60fps.mp4
 
 # Generate using prompt script (.txt)

@@ -1,34 +1,96 @@
 """Configuration classes and factory presets for video generation."""
 
 from dataclasses import dataclass, field
+import logging
 from pathlib import Path
 from typing import Optional, Tuple, Literal, Union
 import torch
 
+logger = logging.getLogger(__name__)
+
 Union_Path = Union[str, Path]
+
+
+def is_float8_supported() -> bool:
+    """Check if Float 8-bit (e4m3fn) is supported natively on the current CUDA device.
+
+    Requires CUDA compute capability >= 8.9 (NVIDIA Ada Lovelace L4/RTX 4090, Hopper H100, Blackwell).
+    """
+    if not torch.cuda.is_available():
+        return False
+    if not hasattr(torch, "float8_e4m3fn"):
+        return False
+    try:
+        major, minor = torch.cuda.get_device_capability()
+        return (major > 8) or (major == 8 and minor >= 9)
+    except Exception:
+        return False
+
+
+def get_optimal_torch_dtype() -> str:
+    """Determine the optimal default precision string for the current hardware.
+
+    Defaults to 'float8_e4m3fn' (Float 8-bit) on Ada Lovelace/Hopper GPUs (e.g. NVIDIA L4, H100),
+    falling back to 'bfloat16' on modern GPUs, 'float16' on older CUDA GPUs, or 'float32' on CPU.
+    """
+    if is_float8_supported():
+        return "float8_e4m3fn"
+    if torch.cuda.is_available():
+        return "bfloat16" if torch.cuda.is_bf16_supported() else "float16"
+    return "float32"
 
 
 @dataclass
 class DeviceConfig:
     """Hardware and execution device configuration."""
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    torch_dtype: str = (
-        "bfloat16"
-        if (torch.cuda.is_available() and torch.cuda.is_bf16_supported())
-        else ("float16" if torch.cuda.is_available() else "float32")
-    )
+    torch_dtype: str = field(default_factory=get_optimal_torch_dtype)
     enable_vae_slicing: bool = True
     enable_vae_tiling: bool = True
     enable_model_cpu_offload: bool = True
     decode_chunk_size: int = 4
 
+    def is_float8(self) -> bool:
+        """Check if configuration requests float 8-bit precision."""
+        return self.torch_dtype.lower().strip() in ("float8_e4m3fn", "float8", "fp8")
+
     def get_torch_dtype(self) -> torch.dtype:
+        """Resolve string precision name to torch.dtype with automatic hardware fallback."""
+        dtype_lower = self.torch_dtype.lower().strip()
+
+        # Handle Float 8-bit with automatic hardware fallback if unsupported
+        if dtype_lower in ("float8_e4m3fn", "float8", "fp8"):
+            if is_float8_supported():
+                return getattr(torch, "float8_e4m3fn", torch.bfloat16)
+            # Automatic fallback to 16-bit
+            logger.warning(
+                "Float 8-bit precision (%s) requested but not supported on device. "
+                "Falling back to 16-bit precision.",
+                self.torch_dtype,
+            )
+            if torch.cuda.is_available():
+                return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+            return torch.float32
+
         mapping = {
             "bfloat16": torch.bfloat16,
             "float16": torch.float16,
             "float32": torch.float32,
+            "bf16": torch.bfloat16,
+            "fp16": torch.float16,
+            "fp32": torch.float32,
         }
-        return mapping.get(self.torch_dtype, torch.bfloat16 if torch.cuda.is_available() else torch.float32)
+        if hasattr(torch, "float8_e4m3fn"):
+            mapping["float8_e4m3fn"] = torch.float8_e4m3fn
+        if hasattr(torch, "float8_e5m2"):
+            mapping["float8_e5m2"] = torch.float8_e5m2
+
+        return mapping.get(
+            dtype_lower,
+            torch.bfloat16 if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) else (
+                torch.float16 if torch.cuda.is_available() else torch.float32
+            ),
+        )
 
 
 @dataclass
@@ -85,6 +147,7 @@ class VideoConfig:
         num_inference_steps: int = 30,
         guidance_scale: float = 5.0,
         model_id: str = "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers",
+        torch_dtype: Optional[str] = None,
         seed: Optional[int] = None,
         output_dir: Union_Path = Path("./outputs"),
     ) -> "VideoConfig":
@@ -92,14 +155,16 @@ class VideoConfig:
 
         Key L4 optimizations:
         - Default model: Wan2.1-I2V-14B-480P-Diffusers (14B parameter foundation model)
-        - bfloat16 precision native to Ada Lovelace / NVIDIA L4 tensor cores
+        - Default precision: Float 8-bit ('float8_e4m3fn') utilizing Ada Lovelace sm_89 FP8 Tensor Cores
+          (with automatic fallback to 16-bit 'bfloat16' / 'float16' on unsupported devices)
         - Model CPU offload enabled so 14B model fits and runs with full capacity in 24GB VRAM
         - 3D VAE slicing & tiling enabled to minimize memory usage
         - High-fps GPU optical flow frame interpolation (16 fps -> 60 fps)
         """
+        dtype = torch_dtype or get_optimal_torch_dtype()
         device = DeviceConfig(
             device="cuda" if torch.cuda.is_available() else "cpu",
-            torch_dtype="bfloat16" if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) else "float16",
+            torch_dtype=dtype,
             enable_vae_slicing=True,
             enable_vae_tiling=True,
             enable_model_cpu_offload=True,

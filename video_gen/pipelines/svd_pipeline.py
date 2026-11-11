@@ -34,6 +34,11 @@ class SVDPipeline(BaseVideoPipeline):
 
         device_cfg = self.config.device
         dtype = device_cfg.get_torch_dtype()
+        if str(dtype).startswith("torch.float8") or dtype in (
+            getattr(torch, "float8_e4m3fn", None),
+            getattr(torch, "float8_e5m2", None),
+        ):
+            dtype = torch.float16
 
         logger.info(
             "Loading StableVideoDiffusionPipeline (%s) onto device=%s (dtype=%s)...",

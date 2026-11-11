@@ -2,16 +2,51 @@
 
 from pathlib import Path
 import torch
-from video_gen.config import DeviceConfig, GenerationConfig, VideoConfig
+from video_gen.config import (
+    DeviceConfig,
+    GenerationConfig,
+    VideoConfig,
+    is_float8_supported,
+    get_optimal_torch_dtype,
+)
 
 
 def test_device_config_defaults():
     cfg = DeviceConfig()
-    assert cfg.torch_dtype in ["bfloat16", "float16", "float32"]
+    assert cfg.torch_dtype in ["float8_e4m3fn", "bfloat16", "float16", "float32"]
     assert cfg.decode_chunk_size == 4
     assert cfg.enable_vae_slicing is True
     assert cfg.enable_vae_tiling is True
     assert isinstance(cfg.get_torch_dtype(), torch.dtype)
+
+
+def test_float8_support_and_fallback(monkeypatch):
+    """Test FP8 support detection and 16-bit fallback logic."""
+    if torch.cuda.is_available() and is_float8_supported():
+        # Native L4 GPU test
+        assert get_optimal_torch_dtype() == "float8_e4m3fn"
+        cfg = DeviceConfig(torch_dtype="float8_e4m3fn")
+        assert cfg.is_float8() is True
+        assert cfg.get_torch_dtype() == torch.float8_e4m3fn
+
+    # Test fallback when is_float8_supported is False
+    monkeypatch.setattr("video_gen.config.is_float8_supported", lambda: False)
+    optimal = get_optimal_torch_dtype()
+    assert optimal in ["bfloat16", "float16", "float32"]
+    assert optimal != "float8_e4m3fn"
+
+    cfg_fallback = DeviceConfig(torch_dtype="float8_e4m3fn")
+    fallback_dtype = cfg_fallback.get_torch_dtype()
+    # Must fallback to 16-bit or float32, NOT raise or stay float8
+    assert fallback_dtype in [torch.bfloat16, torch.float16, torch.float32]
+
+
+def test_float8_cpu_fallback(monkeypatch):
+    """Test that requesting float8 on CPU gracefully falls back to float32."""
+    monkeypatch.setattr("video_gen.config.is_float8_supported", lambda: False)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    cfg = DeviceConfig(device="cpu", torch_dtype="float8_e4m3fn")
+    assert cfg.get_torch_dtype() == torch.float32
 
 
 def test_generation_config_defaults():
@@ -28,7 +63,9 @@ def test_generation_config_defaults():
 def test_video_config_for_l4_gpu():
     cfg = VideoConfig.for_l4_gpu(duration_seconds=15.0, fps=16)
     assert cfg.device.device == ("cuda" if torch.cuda.is_available() else "cpu")
-    assert cfg.device.torch_dtype in ["bfloat16", "float16"]
+    assert cfg.device.torch_dtype in ["float8_e4m3fn", "bfloat16", "float16"]
+    if is_float8_supported():
+        assert cfg.device.torch_dtype == "float8_e4m3fn"
     assert cfg.device.enable_vae_slicing is True
     assert cfg.device.enable_vae_tiling is True
     assert cfg.device.enable_model_cpu_offload is True

@@ -17,7 +17,7 @@ from video_gen.api.schemas import (
     HealthResponse,
     JobStatusResponse,
 )
-from video_gen.config import VideoConfig
+from video_gen.config import VideoConfig, is_float8_supported
 from video_gen.generator import LongVideoGenerator
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,9 @@ def health_check():
         vram_total_gb=round(vram_total, 2) if vram_total else None,
         pipeline_type=p_type,
         pipeline_loaded=loaded,
+        fp8_supported=is_float8_supported(),
         default_config={
+            "torch_dtype": cfg.device.torch_dtype,
             "duration_seconds": cfg.generation.duration_seconds,
             "fps": cfg.generation.fps,
             "target_fps": cfg.generation.target_fps,

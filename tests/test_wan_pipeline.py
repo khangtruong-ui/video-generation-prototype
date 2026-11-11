@@ -71,3 +71,49 @@ def test_diffusers_wan_prompt_clean_no_name_error():
     # Verify that basic_clean and prompt_clean do not raise NameError: name 'ftfy' is not defined
     cleaned = wan_mod.prompt_clean("A magical sunset with &amp; special characters")
     assert "sunset" in cleaned
+
+
+def test_wan_pipeline_fp8_quantization_logic(monkeypatch):
+    """Test that WanVideoPipeline applies FP8 quantization on supported hardware and falls back on unsupported hardware."""
+    from unittest.mock import patch
+
+    # 1. Supported hardware case
+    monkeypatch.setattr("video_gen.pipelines.wan_pipeline.is_float8_supported", lambda: True)
+    cfg = VideoConfig.for_l4_gpu()
+    cfg.device.torch_dtype = "float8_e4m3fn"
+    pipeline = WanVideoPipeline(config=cfg)
+
+    mock_transformer = MagicMock()
+    mock_pipe = MagicMock()
+    mock_pipe.transformer = mock_transformer
+
+    quantize_called = []
+
+    def mock_quantize(model, config):
+        quantize_called.append(config)
+
+    with patch("diffusers.WanImageToVideoPipeline.from_pretrained", return_value=mock_pipe), \
+         patch("transformers.CLIPVisionModel.from_pretrained", return_value=MagicMock()), \
+         patch("diffusers.AutoencoderKLWan.from_pretrained", return_value=MagicMock()), \
+         patch("torchao.quantization.quantize_", side_effect=mock_quantize):
+        pipeline.load()
+        assert pipeline.is_loaded() is True
+        assert len(quantize_called) == 1
+
+    pipeline.unload()
+
+    # 2. Unsupported hardware case: falls back without calling quantize_
+    monkeypatch.setattr("video_gen.pipelines.wan_pipeline.is_float8_supported", lambda: False)
+    cfg_unsupported = VideoConfig.for_l4_gpu()
+    cfg_unsupported.device.torch_dtype = "float8_e4m3fn"
+    pipeline_unsupported = WanVideoPipeline(config=cfg_unsupported)
+
+    quantize_called_fallback = []
+    with patch("diffusers.WanImageToVideoPipeline.from_pretrained", return_value=mock_pipe), \
+         patch("transformers.CLIPVisionModel.from_pretrained", return_value=MagicMock()), \
+         patch("diffusers.AutoencoderKLWan.from_pretrained", return_value=MagicMock()), \
+         patch("torchao.quantization.quantize_", side_effect=lambda m, c: quantize_called_fallback.append(c)):
+        pipeline_unsupported.load()
+        assert pipeline_unsupported.is_loaded() is True
+        # Quantize shouldn't be called because it automatically fell back to 16-bit
+        assert len(quantize_called_fallback) == 0

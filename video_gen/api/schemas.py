@@ -75,6 +75,10 @@ class GenerateRequest(BaseModel):
         default=None,
         description="Pipeline engine: 'wan' (default Wan2.1 14B on GPU), 'svd_xt', 'ltx_video', or 'mock'.",
     )
+    precision: Optional[str] = Field(
+        default="auto",
+        description="Model precision: 'auto' (Float 8-bit on Ada/L4 GPU with 16-bit fallback), 'float8_e4m3fn', 'bfloat16', or 'float16'.",
+    )
 
 
 class GenerateResponse(BaseModel):
@@ -112,4 +116,5 @@ class HealthResponse(BaseModel):
     vram_total_gb: Optional[float] = None
     pipeline_type: str
     pipeline_loaded: bool
+    fp8_supported: bool = False
     default_config: Dict[str, Any]

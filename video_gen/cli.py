@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 import torch
 
-from video_gen.config import VideoConfig
+from video_gen.config import VideoConfig, is_float8_supported, get_optimal_torch_dtype
 from video_gen.generator import LongVideoGenerator
 
 
@@ -45,15 +45,20 @@ def cmd_generate(args):
         print("Using: LTX-Video DiT Pipeline")
     else:
         # Default: Wan2.1 14B Image-to-Video foundation model
+        torch_dtype = None if getattr(args, "precision", "auto") == "auto" else args.precision
         config = VideoConfig.for_l4_gpu(
             duration_seconds=args.duration,
             fps=args.fps or 16,
             target_fps=args.target_fps,
             interpolate_method=args.interpolate_method,
             num_inference_steps=args.steps or 30,
+            torch_dtype=torch_dtype,
             seed=args.seed,
         )
         print("Using: Wan2.1 14B Pipeline on NVIDIA L4 GPU (24GB VRAM)")
+
+    if getattr(args, "precision", "auto") != "auto":
+        config.device.torch_dtype = args.precision
 
     generator = LongVideoGenerator(config=config)
 
@@ -131,6 +136,8 @@ def cmd_info(args):
         alloc_vram = torch.cuda.memory_allocated(0) / (1024**3)
         print(f"Alloc VRAM:   {alloc_vram:.2f} GB")
         print(f"BF16 Support: {torch.cuda.is_bf16_supported()}")
+        print(f"FP8 Support:  {is_float8_supported()}")
+        print(f"Optimal Dtype:{get_optimal_torch_dtype()}")
     else:
         print("Running in CPU-only mode.")
 
@@ -166,6 +173,13 @@ def main():
     gen_parser.add_argument("--interpolate-factor", type=int, default=None, help="Integer frame multiplier (e.g. 2, 4)")
     gen_parser.add_argument("--interpolate-method", type=str, default="auto", choices=["auto", "raft", "blend"], help="Interpolation method (default: auto)")
     gen_parser.add_argument("--steps", type=int, default=30, help="Inference steps per chunk (default: 30)")
+    gen_parser.add_argument(
+        "--precision",
+        type=str,
+        default="auto",
+        choices=["auto", "float8_e4m3fn", "bfloat16", "float16", "float32"],
+        help="Model precision: 'auto' (Float 8-bit on Ada/L4 GPU with 16-bit fallback), 'float8_e4m3fn', 'bfloat16', 'float16' (default: auto)",
+    )
     gen_parser.add_argument("--motion-bucket", type=int, default=127, help="Motion bucket index (1-255)")
     gen_parser.add_argument("--pipeline", type=str, default="wan", choices=["wan", "svd_xt", "ltx_video", "mock"], help="Pipeline engine (default: wan)")
     gen_parser.add_argument("--seed", type=int, default=None, help="Reproducibility seed")

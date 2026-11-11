@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 import torch
 
-from video_gen.config import VideoConfig
+from video_gen.config import VideoConfig, is_float8_supported
 from video_gen.pipelines.base import BaseVideoPipeline, ProgressCallback
 
 logger = logging.getLogger(__name__)
@@ -73,17 +73,47 @@ class WanVideoPipeline(BaseVideoPipeline):
         from diffusers import AutoencoderKLWan, WanImageToVideoPipeline
         from transformers import CLIPVisionModel
 
-        dtype = self.config.device.get_torch_dtype()
+        # Detect Float 8-bit request and hardware support
+        is_fp8_requested = (
+            self.config.device.is_float8()
+            if hasattr(self.config.device, "is_float8")
+            else (str(self.config.device.torch_dtype).lower().strip() in ("float8_e4m3fn", "float8", "fp8"))
+        )
+        fp8_supported = is_float8_supported()
+
+        if is_fp8_requested and not fp8_supported:
+            fallback_dtype_str = "bfloat16" if (torch.cuda.is_available() and torch.cuda.is_bf16_supported()) else (
+                "float16" if torch.cuda.is_available() else "float32"
+            )
+            logger.warning(
+                "Float 8-bit precision (%s) requested, but hardware does not support float8_e4m3fn "
+                "(requires CUDA compute capability >= 8.9). Automatically falling back to 16-bit (%s).",
+                self.config.device.torch_dtype,
+                fallback_dtype_str,
+            )
+            use_fp8 = False
+        else:
+            use_fp8 = is_fp8_requested and fp8_supported
+
+        # Base dtype for diffusers modules (bfloat16 provides maximum stability for VAE/text/vision)
+        base_dtype = (
+            torch.bfloat16
+            if (torch.cuda.is_available() and torch.cuda.is_bf16_supported())
+            else (torch.float16 if torch.cuda.is_available() else torch.float32)
+        )
+        load_dtype = base_dtype if use_fp8 else self.config.device.get_torch_dtype()
 
         logger.info(
-            "Loading WanImageToVideoPipeline (%s) onto device=%s (dtype=%s)...",
+            "Loading WanImageToVideoPipeline (%s) onto device=%s (configured_dtype=%s, load_dtype=%s, fp8=%s)...",
             self.model_id,
             self.config.device.device,
-            dtype,
+            self.config.device.torch_dtype,
+            load_dtype,
+            use_fp8,
         )
 
         try:
-            # Optimal precision configuration: fp32 for CLIP vision and VAE, bfloat16 for 14B transformer
+            # Optimal precision configuration: fp32 for CLIP vision and VAE, base_dtype for pipeline
             image_encoder = CLIPVisionModel.from_pretrained(
                 self.model_id,
                 subfolder="image_encoder",
@@ -98,14 +128,28 @@ class WanVideoPipeline(BaseVideoPipeline):
                 self.model_id,
                 vae=vae,
                 image_encoder=image_encoder,
-                torch_dtype=dtype,
+                torch_dtype=load_dtype,
             )
         except Exception as exc:
             logger.info("Direct subfolder loading fallback: %s. Using standard from_pretrained...", exc)
             self.pipe = WanImageToVideoPipeline.from_pretrained(
                 self.model_id,
-                torch_dtype=dtype,
+                torch_dtype=load_dtype,
             )
+
+        # Apply Float 8-bit weight quantization to 14B Transformer on Ada/L4 GPU
+        if use_fp8 and hasattr(self.pipe, "transformer") and self.pipe.transformer is not None:
+            logger.info("Applying Float 8-bit (float8_e4m3fn) weight quantization to Wan 14B Transformer...")
+            try:
+                from torchao.quantization import quantize_, float8_weight_only
+                quantize_(self.pipe.transformer, float8_weight_only())
+                logger.info("Wan 14B Transformer successfully quantized to Float 8-bit (float8_e4m3fn).")
+            except Exception as quant_err:
+                logger.warning(
+                    "Float 8-bit quantization via torchao failed: %s. Continuing with 16-bit precision (%s).",
+                    quant_err,
+                    load_dtype,
+                )
 
         if self.config.device.device.startswith("cuda") and torch.cuda.is_available():
             # Enable sequential model CPU offload: allows the 14B model to run comfortably on 24GB L4

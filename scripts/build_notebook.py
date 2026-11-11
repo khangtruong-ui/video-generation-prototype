@@ -13,7 +13,7 @@ def build_notebook():
 ### Continuous Long Video Generation with Wan2.1 14B & High-FPS GPU Interpolation (NVIDIA L4 GPU)
 
 This notebook demonstrates how to generate high-fidelity, continuous long videos (default **10.0 seconds** with **Wan2.1 14B Image-to-Video foundation model**, interpolated to smooth **60 FPS** via deep optical flow) using the **`video-generation-prototype`** API:
-1. **Wan2.1 14B Foundation Model**: Flagship open DiT video foundation model by Alibaba running with bfloat16 and model CPU offload on NVIDIA L4 (24GB VRAM).
+1. **Wan2.1 14B Foundation Model**: Flagship open DiT video foundation model by Alibaba running in **Float 8-bit (`float8_e4m3fn`)** native to Ada Lovelace / NVIDIA L4 GPU (with automatic fallback to 16-bit `bfloat16`/`float16` if FP8 is unsupported) and sequential model CPU offload.
 2. **Deep Learning Optical Flow Frame Interpolation**: GPU-accelerated motion-compensated bidirectional warping (RAFT) upscaling native 16 fps to silky smooth 60 fps.
 3. **Autoregressive Temporal Chaining**: Generates sequential 81-frame chunks with cross-dissolve frame blending to eliminate seam cuts.
 4. **Colab Video Display & Download API**: In-notebook HTML5 responsive player with instant direct download and Colab Files API integration.
@@ -34,7 +34,11 @@ if torch.cuda.is_available():
     device_name = torch.cuda.get_device_name(0)
     vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
     bf16 = torch.cuda.is_bf16_supported()
-    print(f"🚀 GPU Detected: {device_name} ({vram_gb:.1f} GB VRAM, BF16={bf16})")
+    from video_gen.config import is_float8_supported, get_optimal_torch_dtype
+    fp8 = is_float8_supported()
+    opt_dtype = get_optimal_torch_dtype()
+    print(f"🚀 GPU Detected: {device_name} ({vram_gb:.1f} GB VRAM, BF16={bf16}, FP8={fp8})")
+    print(f"⚡ Default Precision: {opt_dtype} (FP8 with automatic 16-bit fallback)")
 else:
     print("⚠️ No GPU detected. Running in CPU mode (Mock pipeline will be used).")
 """
@@ -88,11 +92,14 @@ target_fps = 60  # @param {type:"slider", min:16, max:120, step:1}
 # @markdown Diffusion denoising inference steps:
 num_inference_steps = 30  # @param {type:"slider", min:15, max:50, step:5}
 
-# @markdown ### ⚙️ Execution Pipeline
+# @markdown ### ⚙️ Execution Pipeline & Precision
 # @markdown Choose `wan` (Wan2.1 14B on GPU), `svd_xt`, `ltx_video`, or `mock` (instant test):
 pipeline_type = "wan"  # @param ["wan", "svd_xt", "ltx_video", "mock"]
 
-print(f"Target Video Plan: {duration_seconds}s @ native {fps} fps -> High-FPS output: {target_fps} fps")
+# @markdown Model precision: Float 8-bit (`auto` defaults to `float8_e4m3fn` on L4 GPU with 16-bit fallback):
+precision = "auto"  # @param ["auto", "float8_e4m3fn", "bfloat16", "float16"]
+
+print(f"Target Video Plan: {duration_seconds}s @ native {fps} fps -> High-FPS output: {target_fps} fps (precision: {precision})")
 print(f"Prompt: {prompt}")
 print(f"Image Source: {image_url}")
 """
@@ -139,11 +146,13 @@ elif pipeline_type == "ltx_video":
     )
 else:
     print("🎬 Initializing LongVideoGenerator with Wan2.1 14B Image-to-Video pipeline on NVIDIA L4 GPU...")
+    torch_dtype = None if precision == "auto" else precision
     config = VideoConfig.for_l4_gpu(
         duration_seconds=duration_seconds,
         fps=fps,
         target_fps=target_fps,
         num_inference_steps=num_inference_steps,
+        torch_dtype=torch_dtype,
         seed=42,
     )
 
